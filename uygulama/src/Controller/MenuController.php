@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\Baglanti;
 use App\Repository\YemekhaneRepo;
 use RuntimeException;
 
@@ -21,11 +22,30 @@ class MenuController
 
     public function gununMenusu(int $yemekhaneId, string $tarih, int $ogunId): array
     {
+        $redis = Baglanti::redis();
+        $anahtar = "menu:{$yemekhaneId}:{$tarih}:{$ogunId}";
+
+        $onbellek = $redis->get($anahtar);
+        if ($onbellek !== false) {
+            error_log("[REDIS CACHE HIT] {$anahtar}");
+            $veri = json_decode($onbellek, true);
+            $veri['kaynak'] = 'redis';
+            return $veri;
+        }
+
+        error_log("[REDIS CACHE MISS - DB OKUMA] {$anahtar}");
         $menu = $this->repo->gununMenusuGetir($yemekhaneId, $tarih, $ogunId);
         if (!$menu) {
             return ['menu' => null, 'kaynak' => 'veritabani'];
         }
-        return ['menu' => $menu, 'kaynak' => 'veritabani'];
+
+        $sonuc = ['menu' => $menu, 'kaynak' => 'veritabani'];
+
+        $gunSonu = strtotime($tarih . ' 23:59:59');
+        $kalanSaniye = max(60, $gunSonu - time());
+        $redis->setex($anahtar, $kalanSaniye, json_encode($sonuc, JSON_UNESCAPED_UNICODE));
+
+        return $sonuc;
     }
 
     public function haftalik(int $yemekhaneId, array $kullanici): array
@@ -62,6 +82,11 @@ class MenuController
         }
 
         $menuId = $this->repo->menuKaydet($yemekhaneId, $tarih, $ogunId, $ogrFiyat, $perFiyat, $yemekIdler);
-        return ['mesaj' => 'Menü kaydedildi.', 'menu_id' => $menuId];
+
+        $anahtar = "menu:{$yemekhaneId}:{$tarih}:{$ogunId}";
+        Baglanti::redis()->del($anahtar);
+        error_log("[REDIS CACHE INVALIDATE] {$anahtar} silindi.");
+
+        return ['mesaj' => 'Menü kaydedildi ve önbellek güncellendi.', 'menu_id' => $menuId];
     }
 }

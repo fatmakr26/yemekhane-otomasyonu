@@ -91,7 +91,7 @@ async function sabitleriYukle() {
   `).join('');
 }
 
-// 2. EKRAN: GÜNÜN MENÜSÜ (SAF AŞAMA 2)
+// 2. EKRAN: GÜNÜN MENÜSÜ (AŞAMA 3: REDIS ÖNBELLEK + ALERJENLER)
 async function gununMenusunuYukle() {
   const yh = document.getElementById('gunun-yemekhane').value || 1;
   const tarih = document.getElementById('gunun-tarih').value || bugunStr();
@@ -101,8 +101,8 @@ async function gununMenusunuYukle() {
 
   try {
     const veri = await apiIstek(`/api/gunun-menusu?yemekhane_id=${yh}&tarih=${tarih}&ogun_id=${ogun}`);
-    rozet.textContent = 'Kaynak: Veritabanı (Replica)';
-    rozet.className = 'rozet rozet-db';
+    rozet.textContent = veri.kaynak === 'redis' ? 'Kaynak: Redis Önbellek' : 'Kaynak: Veritabanı (Replica)';
+    rozet.className = 'rozet ' + (veri.kaynak === 'redis' ? 'rozet-redis' : 'rozet-db');
 
     if (!veri.menu) {
       icerik.innerHTML = '<p style="color:var(--metin-soluk);">Seçilen tarih ve öğün için tanımlı menü bulunamadı.</p>';
@@ -115,14 +115,17 @@ async function gununMenusunuYukle() {
       <p><strong>Toplam Kalori:</strong> ${m.toplam_kalori} kcal | <strong>Sizin Ücretiniz:</strong> ${Number(fiyat).toFixed(2)} TL | <strong>Rezervasyon Son:</strong> ${m.rezervasyon_son}</p>
       <div class="tablo-kaydir">
         <table>
-          <thead><tr><th>Kategori</th><th>Yemek</th><th>Kalori</th><th>Özellik</th></tr></thead>
+          <thead><tr><th>Kategori</th><th>Yemek</th><th>Kalori</th><th>Özellik / Alerjen</th></tr></thead>
           <tbody>
             ${m.yemekler.map(y => `
               <tr>
                 <td>${y.kategori}</td>
                 <td><strong>${y.ad}</strong></td>
                 <td>${y.kalori} kcal</td>
-                <td>${y.vejetaryen ? '<span class="rozet rozet-vej">Vejetaryen</span>' : '-'}</td>
+                <td>
+                  ${y.vejetaryen ? '<span class="rozet rozet-vej">Vejetaryen</span> ' : ''}
+                  ${y.alerjenler ? `<span class="rozet rozet-alerjen">Alerjen: ${y.alerjenler}</span>` : (!y.vejetaryen ? '-' : '')}
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -259,6 +262,7 @@ async function degerlendirmeGonder(ev, menuId) {
   }
 }
 
+// 5. EKRAN: BAKİYE
 async function bakiyeEkraniniYukle() {
   try {
     const veri = await apiIstek('/api/bakiye');
@@ -278,6 +282,7 @@ async function bakiyeEkraniniYukle() {
   }
 }
 
+// 7. EKRAN: YÖNETİCİ PANELİ
 async function yoneticiEkraniniYukle() {
   try {
     const veri = await apiIstek('/api/yonetici/menuler');
@@ -295,6 +300,7 @@ async function yoneticiEkraniniYukle() {
   }
 }
 
+// OLAY DİNLEYİCİLER
 document.getElementById('giris-form').addEventListener('submit', async e => {
   e.preventDefault();
   try {
