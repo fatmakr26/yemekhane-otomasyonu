@@ -86,13 +86,19 @@ try {
         $method === 'POST' && $uri === '/api/degerlendir'
             => $islem->degerlendir(AuthController::oturumDogrula($token), $veri),
 
+        $method === 'GET' && $uri === '/api/alerjenlerim'
+            => $islem->alerjenlerim(AuthController::oturumDogrula($token)),
+
+        $method === 'POST' && $uri === '/api/alerjenlerim'
+            => $islem->alerjenKaydet(AuthController::oturumDogrula($token), $veri),
+
         $method === 'GET' && $uri === '/api/yonetici/menuler'
             => $menu->yoneticiRaporu(AuthController::oturumDogrula($token)),
 
         $method === 'POST' && $uri === '/api/yonetici/menu-kaydet'
             => $menu->yoneticiMenuKaydet(AuthController::oturumDogrula($token), $veri),
 
-        default => throw new RuntimeException('İstenen uç nokta bulunamadı.', 404)
+        default => throw new RuntimeException('Istenen uc nokta bulunamadi.', 404)
     };
 
     echo json_encode($sonuc, JSON_UNESCAPED_UNICODE);

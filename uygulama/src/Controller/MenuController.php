@@ -17,6 +17,7 @@ class MenuController
             'yemekhaneler' => $this->repo->yemekhaneler(),
             'ogunler'      => $this->repo->ogunler(),
             'yemekler'     => $this->repo->tumYemekler(),
+            'alerjenler'   => $this->repo->alerjenler(),
         ];
     }
 
@@ -59,7 +60,7 @@ class MenuController
     public function yoneticiRaporu(array $kullanici): array
     {
         if ($kullanici['rol'] !== 'yonetici') {
-            throw new RuntimeException('Bu işlem için yönetici yetkisi gerekir.', 403);
+            throw new RuntimeException('Bu islem icin yonetici yetkisi gerekir.', 403);
         }
         return ['menuler' => $this->repo->yoneticiMenuRaporu()];
     }
@@ -67,7 +68,7 @@ class MenuController
     public function yoneticiMenuKaydet(array $kullanici, array $veri): array
     {
         if ($kullanici['rol'] !== 'yonetici') {
-            throw new RuntimeException('Bu işlem için yönetici yetkisi gerekir.', 403);
+            throw new RuntimeException('Bu islem icin yonetici yetkisi gerekir.', 403);
         }
 
         $yemekhaneId = (int)($veri['yemekhane_id'] ?? 0);
@@ -77,16 +78,16 @@ class MenuController
         $perFiyat    = (float)($veri['personel_fiyati'] ?? 0);
         $yemekIdler  = (array)($veri['yemek_idler'] ?? []);
 
-        if ($yemekhaneId <= 0 || $tarih === '' || $ogunId <= 0) {
-            throw new RuntimeException('Yemekhane, tarih ve öğün seçimi zorunludur.');
+        if ($yemekhaneId <= 0 || $tarih === '' ||$ogunId <= 0) {
+            throw new RuntimeException('Yemekhane, tarih ve ogun secimi zorunludur.');
         }
 
-        $menuId = $this->repo->menuKaydet($yemekhaneId, $tarih, $ogunId, $ogrFiyat, $perFiyat, $yemekIdler);
+        $menuId =$this->repo->menuKaydet($yemekhaneId,$tarih, $ogunId,$ogrFiyat, $perFiyat,$yemekIdler);
 
         $anahtar = "menu:{$yemekhaneId}:{$tarih}:{$ogunId}";
         Baglanti::redis()->del($anahtar);
         error_log("[REDIS CACHE INVALIDATE] {$anahtar} silindi.");
 
-        return ['mesaj' => 'Menü kaydedildi ve önbellek güncellendi.', 'menu_id' => $menuId];
+        return ['mesaj' => 'Menu kaydedildi ve onbellek guncellendi.', 'menu_id' => $menuId];
     }
 }

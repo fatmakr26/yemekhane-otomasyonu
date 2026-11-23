@@ -10,16 +10,15 @@ use RuntimeException;
 
 class YemekhaneRepo
 {
-    // Hata kodu 1644 (SQLSTATE 45000) yordam mesajını temiz çıkarır
     private function spHataAyikla(PDOException $e): never
     {
         if (isset($e->errorInfo[1]) && (int)$e->errorInfo[1] === 1644) {
-            throw new RuntimeException($e->errorInfo[2] ?? 'İşlem gerçekleştirilemedi.');
+            throw new RuntimeException($e->errorInfo[2] ?? 'Islem gerceklestirilemedi.');
         }
-        throw new RuntimeException('Veritabanı işlemi sırasında bir hata oluştu.');
+        throw new RuntimeException('Veritabani islemi sirasinda bir hata olustu.');
     }
 
-    // --- KULLANICI & BAKİYE ---
+    // --- KULLANICI & BAKIYE & ALERJEN ---
     public function epostaIleKullaniciBul(string $eposta): ?array
     {
         $stmt = Baglanti::okuma()->prepare(
@@ -31,12 +30,45 @@ class YemekhaneRepo
         return $row ?: null;
     }
 
-    // Rezervasyondan hemen sonra replikasyon gecikmesini önlemek için bakiyeyi Primary'den okur
     public function guncelBakiyePrimary(int $kullaniciId): float
     {
         $stmt = Baglanti::yazma()->prepare('SELECT bakiye FROM kullanicilar WHERE id = ?');
         $stmt->execute([$kullaniciId]);
         return (float)$stmt->fetchColumn();
+    }
+
+    public function kullaniciAlerjenleri(int $kullaniciId): array
+    {
+        $stmt = Baglanti::okuma()->prepare(
+            'SELECT alerjen_id FROM kullanici_alerjenleri WHERE kullanici_id = ? ORDER BY alerjen_id'
+        );
+        $stmt->execute([$kullaniciId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function kullaniciAlerjenleriKaydet(int $kullaniciId, array $alerjenIdler): array
+    {
+        $db = Baglanti::yazma();
+        $db->beginTransaction();
+        try {
+            $del = $db->prepare('DELETE FROM kullanici_alerjenleri WHERE kullanici_id = ?');
+            $del->execute([$kullaniciId]);
+
+            $ins = $db->prepare('INSERT IGNORE INTO kullanici_alerjenleri (kullanici_id, alerjen_id) VALUES (?, ?)');
+            foreach ($alerjenIdler as $aid) {
+                $aidInt = (int)$aid;
+                if ($aidInt > 0) {
+                    $ins->execute([$kullaniciId, $aidInt]);
+                }
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw new RuntimeException('Alerjen tercihleri kaydedilemedi: ' . $e->getMessage());
+        }
+        return $this->kullaniciAlerjenleri($kullaniciId);
     }
 
     public function bakiyeHareketleri(int $kullaniciId): array
@@ -64,7 +96,7 @@ class YemekhaneRepo
         }
     }
 
-    // --- YEMEKHANE & ÖĞÜN & YEMEK LİSTELERİ (REPLICA) ---
+    // --- YEMEKHANE & OGUN & YEMEK & ALERJEN LISTELERI (REPLICA) ---
     public function yemekhaneler(): array
     {
         return Baglanti::okuma()->query('SELECT id, ad, konum, kapasite FROM yemekhaneler ORDER BY id')->fetchAll();
@@ -73,6 +105,11 @@ class YemekhaneRepo
     public function ogunler(): array
     {
         return Baglanti::okuma()->query('SELECT id, ad, sira, son_saat, servis_baslangic, servis_bitis FROM ogunler ORDER BY sira')->fetchAll();
+    }
+
+    public function alerjenler(): array
+    {
+        return Baglanti::okuma()->query('SELECT id, ad FROM alerjenler ORDER BY id')->fetchAll();
     }
 
     public function tumYemekler(): array
@@ -84,7 +121,7 @@ class YemekhaneRepo
         return Baglanti::okuma()->query($sql)->fetchAll();
     }
 
-    // --- MENÜ DETAY & HAFTALIK MENÜ (REPLICA) ---
+    // --- MENU DETAY & HAFTALIK MENU (REPLICA) ---
     public function gununMenusuGetir(int $yemekhaneId, string $tarih, int $ogunId): ?array
     {
         $stmt = Baglanti::okuma()->prepare(
@@ -135,7 +172,7 @@ class YemekhaneRepo
                        d.kapasite, d.rezerve, d.bos_yer, d.doluluk_yuzde, d.rezervasyon_son,
                        m.ogrenci_fiyati, m.personel_fiyati,
                        (d.rezervasyon_son <= NOW()) AS sure_doldu,
-                       r.id AS benim_rez_id, r.durum AS benim_rez_durum
+                       r.id AS benim_rez_id, r.durum AS benim_rez_durum, r.porsiyon AS benim_porsiyon
                   FROM v_menu_doluluk d
                   JOIN menuler m ON m.id = d.menu_id
                   JOIN ogunler o ON o.id = d.ogun_id
@@ -148,27 +185,36 @@ class YemekhaneRepo
         $menuler = $stmt->fetchAll();
 
         $yemekStmt = Baglanti::okuma()->prepare(
-            'SELECT y.ad, y.kalori, y.vejetaryen, k.ad AS kategori
+            'SELECT y.ad, y.kalori, y.vejetaryen, k.ad AS kategori,
+                    GROUP_CONCAT(ya.alerjen_id) AS alerjen_idler
                FROM menu_yemekleri my
                JOIN yemekler y ON y.id = my.yemek_id
                JOIN yemek_kategorileri k ON k.id = y.kategori_id
+               LEFT JOIN yemek_alerjenleri ya ON ya.yemek_id = y.id
               WHERE my.menu_id = ?
+              GROUP BY y.id, y.ad, y.kalori, y.vejetaryen, k.ad, k.sira
               ORDER BY k.sira, y.ad'
         );
 
         foreach ($menuler as &$menu) {
             $yemekStmt->execute([$menu['menu_id']]);
-            $menu['yemekler'] = $yemekStmt->fetchAll();
+            $yemekler = $yemekStmt->fetchAll();
+            foreach ($yemekler as &$ymk) {
+                $ymk['alerjen_idler'] = $ymk['alerjen_idler']
+                    ? array_map('intval', explode(',', (string)$ymk['alerjen_idler']))
+                    : [];
+            }
+            $menu['yemekler'] = $yemekler;
         }
         return $menuler;
     }
 
-    // --- REZERVASYON & DEĞERLENDİRME ---
-    public function rezervasyonYap(int $kullaniciId, int $menuId): array
+    // --- REZERVASYON & DEGERLENDIRME ---
+    public function rezervasyonYap(int $kullaniciId, int $menuId, string $porsiyon = 'tam'): array
     {
         try {
-            $stmt = Baglanti::yazma()->prepare('CALL sp_rezervasyon_yap(?, ?)');
-            $stmt->execute([$kullaniciId, $menuId]);
+            $stmt = Baglanti::yazma()->prepare('CALL sp_rezervasyon_yap(?, ?, ?)');
+            $stmt->execute([$kullaniciId, $menuId, $porsiyon]);
             $sonuc = $stmt->fetch();
             $stmt->closeCursor();
             return $sonuc ?: [];
@@ -192,7 +238,7 @@ class YemekhaneRepo
 
     public function kullaniciRezervasyonlari(int $kullaniciId): array
     {
-        $sql = 'SELECT r.id AS rezervasyon_id, r.menu_id, r.durum, r.ucret, r.olusturma,
+        $sql = 'SELECT r.id AS rezervasyon_id, r.menu_id, r.porsiyon, r.durum, r.ucret, r.olusturma,
                        r.kullanma_zamani, r.iptal_zamani,
                        m.tarih, yh.ad AS yemekhane, o.ad AS ogun,
                        TIMESTAMP(m.tarih, o.son_saat) AS rezervasyon_son,
@@ -212,17 +258,19 @@ class YemekhaneRepo
 
     public function degerlendirmeKaydet(int $kullaniciId, int $menuId, int $puan, string $yorum): void
     {
-        // Yalnızca 'kullanildi' durumundaki rezervasyonu olanlar değerlendirme yapabilir
         $kontrol = Baglanti::okuma()->prepare(
             "SELECT id FROM rezervasyonlar WHERE kullanici_id = ? AND menu_id = ? AND durum = 'kullanildi'"
         );
         $kontrol->execute([$kullaniciId, $menuId]);
         if (!$kontrol->fetch()) {
-            throw new RuntimeException('Yalnızca turnikeden geçip kullandığınız menüleri değerlendirebilirsiniz.');
+            throw new RuntimeException('Yalnizca turnikeden gecip kullandiginiz menuleri degerlendirebilirsiniz.');
         }
 
-        if ($puan < 1 || $puan > 5) {
-            throw new RuntimeException('Puan 1 ile 5 arasında olmalıdır.');
+        if ($puan < 1) {
+            throw new RuntimeException('Puan 1 ile 5 arasinda olmalidir.');
+        }
+        if ($puan > 5) {
+            throw new RuntimeException('Puan 1 ile 5 arasinda olmalidir.');
         }
 
         $sql = 'INSERT INTO degerlendirmeler (kullanici_id, menu_id, puan, yorum)
@@ -232,7 +280,7 @@ class YemekhaneRepo
         $stmt->execute([$kullaniciId, $menuId, $puan, $yorum !== '' ? $yorum : null]);
     }
 
-    // --- YÖNETİCİ PANELİ ---
+    // --- YONETICI PANELI ---
     public function yoneticiMenuRaporu(): array
     {
         $sql = 'SELECT d.menu_id, d.tarih, d.yemekhane_id, d.yemekhane, d.ogun_id, d.ogun,
@@ -250,7 +298,7 @@ class YemekhaneRepo
     public function menuKaydet(int $yemekhaneId, string $tarih, int $ogunId, float $ogrFiyat, float $perFiyat, array $yemekIdler): int
     {
         if (empty($yemekIdler)) {
-            throw new RuntimeException('Menü için en az bir yemek seçmelisiniz.');
+            throw new RuntimeException('Menu icin en az bir yemek secmelisiniz.');
         }
 
         $db = Baglanti::yazma();
@@ -282,7 +330,7 @@ class YemekhaneRepo
             return $menuId;
         } catch (\Throwable $e) {
             $db->rollBack();
-            throw new RuntimeException('Menü kaydedilemedi: ' . $e->getMessage());
+            throw new RuntimeException('Menu kaydedilemedi: ' . $e->getMessage());
         }
     }
 }

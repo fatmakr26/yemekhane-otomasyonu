@@ -13,16 +13,16 @@ class IslemController
     public function rezervasyonYap(array $kullanici, array $veri): array
     {
         $menuId = (int)($veri['menu_id'] ?? 0);
+        $porsiyon = trim((string)($veri['porsiyon'] ?? 'tam'));
         if ($menuId <= 0) {
-            throw new RuntimeException('Geçersiz menü.');
+            throw new RuntimeException('Gecersiz menu.');
         }
 
-        $sonuc = $this->repo->rezervasyonYap((int)$kullanici['id'], $menuId);
-        // Replikasyon gecikmesine takılmamak için bakiye Primary sunucudan okunur
+        $sonuc = $this->repo->rezervasyonYap((int)$kullanici['id'], $menuId, $porsiyon);
         $guncelBakiye = $this->repo->guncelBakiyePrimary((int)$kullanici['id']);
 
         return [
-            'mesaj'          => 'Rezervasyonunuz oluşturuldu.',
+            'mesaj'          => 'Rezervasyonunuz olusturuldu (' . ($porsiyon === 'yarim' ? 'Yarim Porsiyon' : 'Tam Porsiyon') . ').',
             'rezervasyon_id' => $sonuc['rezervasyon_id'] ?? null,
             'ucret'          => $sonuc['ucret'] ?? 0,
             'bakiye'         => $guncelBakiye
@@ -33,14 +33,14 @@ class IslemController
     {
         $rezId = (int)($veri['rezervasyon_id'] ?? 0);
         if ($rezId <= 0) {
-            throw new RuntimeException('Geçersiz rezervasyon.');
+            throw new RuntimeException('Gecersiz rezervasyon.');
         }
 
         $sonuc = $this->repo->rezervasyonIptal((int)$kullanici['id'], $rezId);
         $guncelBakiye = $this->repo->guncelBakiyePrimary((int)$kullanici['id']);
 
         return [
-            'mesaj'  => 'Rezervasyon iptal edildi ve ücret iade edildi.',
+            'mesaj'  => 'Rezervasyon iptal edildi ve ucret iade edildi.',
             'iade'   => $sonuc['iade'] ?? 0,
             'bakiye' => $guncelBakiye
         ];
@@ -69,7 +69,7 @@ class IslemController
         $guncelBakiye = $this->repo->guncelBakiyePrimary((int)$kullanici['id']);
 
         return [
-            'mesaj'  => 'Bakiye yüklendi.',
+            'mesaj'  => 'Bakiye yuklendi.',
             'bakiye' => $guncelBakiye
         ];
     }
@@ -81,10 +81,27 @@ class IslemController
         $yorum  = trim((string)($veri['yorum'] ?? ''));
 
         if ($menuId <= 0) {
-            throw new RuntimeException('Geçersiz menü.');
+            throw new RuntimeException('Gecersiz menu.');
         }
 
         $this->repo->degerlendirmeKaydet((int)$kullanici['id'], $menuId, $puan, $yorum);
-        return ['mesaj' => 'Değerlendirmeniz kaydedildi.'];
+        return ['mesaj' => 'Degerlendirmeniz kaydedildi.'];
+    }
+
+    public function alerjenlerim(array $kullanici): array
+    {
+        return [
+            'alerjen_idler' => $this->repo->kullaniciAlerjenleri((int)$kullanici['id'])
+        ];
+    }
+
+    public function alerjenKaydet(array $kullanici, array $veri): array
+    {
+        $idler = (array)($veri['alerjen_idler'] ?? []);
+        $guncel = $this->repo->kullaniciAlerjenleriKaydet((int)$kullanici['id'], $idler);
+        return [
+            'mesaj'         => 'Alerjen tercihleriniz guncellendi.',
+            'alerjen_idler' => $guncel
+        ];
     }
 }
